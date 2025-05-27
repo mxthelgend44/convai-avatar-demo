@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Convai Fast Avatar Demo</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background-color: #f0f0f0; }
+        #controls { margin-top: 20px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        #response { margin-top: 20px; font-size: 1.2em; color: #333; }
+        #status { margin-top: 10px; color: gray; }
+        canvas { border: 1px solid #ccc; background-color: #eee; } /* Placeholder for 3D, actual canvas will be added by Three.js */
+    </style>
+</head>
+<body>
+    <h1>Talk to the AI Avatar!</h1>
+    <div id="3d-container" style="width: 400px; height: 300px; background-color: #ddd; display: flex; align-items: center; justify-content: center; border: 1px solid #aaa;">
+        <p>Loading 3D avatar...</p>
+    </div>
+    <div id="controls">
+        <button id="start-speaking-btn">Hold to Speak</button>
+        <input type="text" id="text-input" placeholder="Type your message..." style="padding: 8px; margin-left: 10px;">
+        <button id="send-text-btn">Send Text</button>
+    </div>
+    <div id="status">Status: Ready</div>
+    <div id="response"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/convai-web-sdk/dist/convai-web-sdk.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- Replace with your actual Convai credentials ---
+        const CONVAI_API_KEY = "2064219596e90898241d59217bd06833";
+        const CONVAI_CHARACTER_ID = "144bb8be-39ee-11f0-ac1d-42010a7be01f";
+        // ---------------------------------------------------
+
+        let convaiClient;
+        let currentSpeechPlaying = false;
+        let currentThreeAvatar = null; // To hold our simple 3D object
+
+        const startSpeakingBtn = document.getElementById('start-speaking-btn');
+        const textInput = document.getElementById('text-input');
+        const sendTextBtn = document.getElementById('send-text-btn');
+        const responseDiv = document.getElementById('response');
+        const statusDiv = document.getElementById('status');
+        const threeDContainer = document.getElementById('3d-container');
+
+        // --- Basic 3D Scene Setup (Three.js) ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, threeDContainer.clientWidth / threeDContainer.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // alpha:true for transparent background
+        renderer.setSize(threeDContainer.clientWidth, threeDContainer.clientHeight);
+        threeDContainer.innerHTML = ''; // Clear placeholder text
+        threeDContainer.appendChild(renderer.domElement);
+
+        // Simple "avatar" - a cube for demonstration
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshBasicMaterial({ color: 0x0077ff });
+        currentThreeAvatar = new THREE.Mesh(geometry, material);
+        scene.add(currentThreeAvatar);
+
+        camera.position.z = 2; // Move camera back
+
+        // Animation for the "avatar" to simulate talking
+        function animateAvatar() {
+            if (currentSpeechPlaying) {
+                currentThreeAvatar.rotation.x += 0.05;
+                currentThreeAvatar.rotation.y += 0.01;
+            } else {
+                // Reset to a default state or animate idle
+                currentThreeAvatar.rotation.x = Math.sin(Date.now() * 0.001) * 0.1;
+                currentThreeAvatar.rotation.y = Math.cos(Date.now() * 0.001) * 0.1;
+            }
+            requestAnimationFrame(animateAvatar);
+            renderer.render(scene, camera);
+        }
+        animateAvatar(); // Start the animation loop
+
+        // --- Convai Client Initialization ---
+        function initializeConvai() {
+            statusDiv.textContent = 'Status: Initializing Convai...';
+            try {
+                convaiClient = new convai_web_sdk.ConvaiClient({
+                    apiKey: CONVAI_API_KEY,
+                    characterId: CONVAI_CHARACTER_ID,
+                    enableAudio: true,
+                    enableFacialData: false // Keeping this false for extreme simplicity, no complex avatar
+                });
+
+                convaiClient.setResponseCallback((response) => {
+                    if (response.hasOwnProperty('textResponse')) {
+                        responseDiv.textContent = `AI: ${response.textResponse}`;
+                    }
+                });
+
+                convaiClient.onAudioPlay(() => {
+                    currentSpeechPlaying = true;
+                    statusDiv.textContent = 'Status: AI Speaking...';
+                    startSpeakingBtn.disabled = true;
+                    sendTextBtn.disabled = true;
+                });
+
+                convaiClient.onAudioStop(() => {
+                    currentSpeechPlaying = false;
+                    statusDiv.textContent = 'Status: Ready';
+                    startSpeakingBtn.disabled = false;
+                    sendTextBtn.disabled = false;
+                });
+
+                statusDiv.textContent = 'Status: Ready (Microphone & Text)';
+                startSpeakingBtn.disabled = false;
+                sendTextBtn.disabled = false;
+
+            } catch (error) {
+                statusDiv.textContent = `Status: Error initializing Convai: ${error.message}`;
+                console.error("Error initializing Convai:", error);
+            }
+        }
+
+        // --- Event Listeners for Interaction ---
+        startSpeakingBtn.addEventListener('mousedown', () => {
+            if (convaiClient && !currentSpeechPlaying) {
+                convaiClient.startAudioChunk();
+                statusDiv.textContent = 'Status: Listening... Release to send.';
+            }
+        });
+
+        startSpeakingBtn.addEventListener('mouseup', () => {
+            if (convaiClient && !currentSpeechPlaying) {
+                convaiClient.endAudioChunk();
+                statusDiv.textContent = 'Status: Processing...';
+            }
+        });
+
+        sendTextBtn.addEventListener('click', () => {
+            const userText = textInput.value.trim();
+            if (convaiClient && userText && !currentSpeechPlaying) {
+                convaiClient.sendTextChunk(userText);
+                statusDiv.textContent = 'Status: Sending text...';
+                responseDiv.textContent = `You: ${userText}`;
+                textInput.value = ''; // Clear input
+            }
+        });
+
+        // Initialize Convai when the page loads
+        window.onload = initializeConvai;
+
+        // Handle window resize for Three.js
+        window.addEventListener('resize', () => {
+            camera.aspect = threeDContainer.clientWidth / threeDContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(threeDContainer.clientWidth, threeDContainer.clientHeight);
+        });
+    </script>
+</body>
+</html>
